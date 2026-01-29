@@ -25,9 +25,27 @@ def load_dataframe(file_path: str, sheet_name: Optional[str] = None) -> pd.DataF
         raise FileNotFoundError(f"File not found: {file_path}")
 
     if path.suffix.lower() == ".csv":
-        return pd.read_csv(file_path)
+        df = pd.read_csv(file_path)
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError(f"Expected DataFrame from CSV file, got {type(df)}")
+        return df
     elif path.suffix.lower() in [".xlsx", ".xls"]:
-        return pd.read_excel(file_path, sheet_name=sheet_name)
+        # If sheet_name is None, explicitly use 0 to get first sheet (avoids dict return)
+        if sheet_name is None:
+            result = pd.read_excel(file_path, sheet_name=0)
+        else:
+            result = pd.read_excel(file_path, sheet_name=sheet_name)
+        
+        # If sheet_name was provided as None and file has multiple sheets, read_excel might return a dict
+        # In that case, use the first sheet
+        if isinstance(result, dict):
+            if not result:
+                raise ValueError(f"No sheets found in Excel file: {file_path}")
+            result = list(result.values())[0]
+        
+        if not isinstance(result, pd.DataFrame):
+            raise ValueError(f"Expected DataFrame from Excel file, got {type(result)}")
+        return result
     else:
         raise ValueError(f"Unsupported file format: {path.suffix}")
 
@@ -48,6 +66,12 @@ def align_columns(
     Returns:
         Tuple of (aligned_generated_df, aligned_ground_truth_df, column_names)
     """
+    # Validate inputs are DataFrames
+    if not isinstance(generated_df, pd.DataFrame):
+        raise TypeError(f"generated_df must be a DataFrame, got {type(generated_df)}")
+    if not isinstance(ground_truth_df, pd.DataFrame):
+        raise TypeError(f"ground_truth_df must be a DataFrame, got {type(ground_truth_df)}")
+    
     if column_mapping is None:
         # Find common columns
         common_columns = list(set(generated_df.columns) & set(ground_truth_df.columns))

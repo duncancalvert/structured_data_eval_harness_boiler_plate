@@ -162,8 +162,8 @@ def calculate_all_metrics(
         Dictionary containing all metric scores
     """
     return {
-        "cosine_similarity": calculate_cosine_similarity(text1, text2),
-        "cosine_similarity_tfidf": calculate_cosine_similarity(text1, text2, use_tfidf=True),
+        "cosine_similarity": calculate_cosine_similarity(text1, text2, use_tfidf=False),  # TF only (no IDF)
+        "cosine_similarity_tfidf": calculate_cosine_similarity(text1, text2, use_tfidf=True),  # Full TF-IDF
         "levenshtein_distance": calculate_levenshtein_distance(text1, text2),
         "edit_distance": calculate_edit_distance(text1, text2, normalized=False),
         "edit_distance_normalized": calculate_edit_distance(text1, text2, normalized=True),

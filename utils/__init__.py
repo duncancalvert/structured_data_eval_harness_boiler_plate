@@ -12,6 +12,7 @@ from utils.data_loader import (
     align_columns,
     prepare_comparison_pairs,
 )
+from utils.create_test_data import create_test_data_files
 
 __all__ = [
     "calculate_cosine_similarity",
@@ -22,4 +23,5 @@ __all__ = [
     "load_dataframe",
     "align_columns",
     "prepare_comparison_pairs",
+    "create_test_data_files",
 ]

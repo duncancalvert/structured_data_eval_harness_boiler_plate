@@ -22,6 +22,7 @@ class StructuredDataEvaluator:
         ground_truth_path: str,
         column_mapping: Optional[Dict[str, str]] = None,
         match_strategy: str = "index",
+        key_column: Optional[str] = None,
     ):
         """Initialize the evaluator.
 
@@ -34,11 +35,15 @@ class StructuredDataEvaluator:
                            - "index": Match by index (default)
                            - "all_pairs": Compare all generated with all ground truth
                            - "truncate": Truncate longer dataset to match shorter one
+                           - "key": Match rows by key column value (requires key_column)
+            key_column: Column name to use for key-based matching. If provided and match_strategy="key",
+                       rows will be matched based on matching values in this column.
         """
         self.generated_data_path = generated_data_path
         self.ground_truth_path = ground_truth_path
         self.column_mapping = column_mapping
         self.match_strategy = match_strategy
+        self.key_column = key_column
 
         # Load dataframes
         self.generated_df = load_dataframe(generated_data_path)
@@ -50,6 +55,50 @@ class StructuredDataEvaluator:
             self.aligned_ground_truth,
             self.column_names,
         ) = align_columns(self.generated_df, self.ground_truth_df, column_mapping)
+        
+        # Initialize matched_pairs
+        self.matched_pairs = None
+        
+        # Create key-based matching if key_column is provided
+        if key_column and match_strategy == "key":
+            self._create_key_matching()
+
+    def _create_key_matching(self):
+        """Create key-based matching between generated and ground truth dataframes."""
+        if self.key_column not in self.generated_df.columns:
+            raise ValueError(f"Key column '{self.key_column}' not found in generated data")
+        
+        # Find the corresponding key column in ground truth
+        if self.column_mapping:
+            # Check if key_column is mapped
+            gt_key_column = None
+            for gen_col, gt_col in self.column_mapping.items():
+                if gen_col == self.key_column:
+                    gt_key_column = gt_col
+                    break
+            if gt_key_column is None:
+                gt_key_column = self.key_column  # Try same name
+        else:
+            gt_key_column = self.key_column
+        
+        if gt_key_column not in self.ground_truth_df.columns:
+            raise ValueError(f"Key column '{gt_key_column}' not found in ground truth data")
+        
+        # Create matching based on key values
+        gen_keys = self.generated_df[self.key_column].values
+        gt_keys = self.ground_truth_df[gt_key_column].values
+        
+        # Create a mapping: key -> (gen_index, gt_index)
+        self.matched_pairs = []
+        for gen_idx, gen_key in enumerate(gen_keys):
+            # Find matching ground truth rows
+            gt_indices = [i for i, gt_key in enumerate(gt_keys) if str(gen_key).strip().lower() == str(gt_key).strip().lower()]
+            if gt_indices:
+                # Use first match if multiple exist
+                self.matched_pairs.append((gen_idx, gt_indices[0], gen_key))
+            else:
+                # No match found - still include but mark as unmatched
+                self.matched_pairs.append((gen_idx, None, gen_key))
 
     def evaluate_column(
         self,
@@ -74,12 +123,23 @@ class StructuredDataEvaluator:
         generated_series = self.aligned_generated[column_name]
         ground_truth_series = self.aligned_ground_truth[column_name]
 
-        # Prepare comparison pairs
-        pairs = prepare_comparison_pairs(
-            generated_series,
-            ground_truth_series,
-            match_strategy=self.match_strategy,
-        )
+        # Prepare comparison pairs based on match strategy
+        if self.match_strategy == "key" and self.matched_pairs is not None:
+            # Use key-based matching
+            pairs = []
+            for gen_idx, gt_idx, key_value in self.matched_pairs:
+                if gt_idx is not None:
+                    gen_val = generated_series.iloc[gen_idx] if gen_idx < len(generated_series) else None
+                    gt_val = ground_truth_series.iloc[gt_idx] if gt_idx < len(ground_truth_series) else None
+                    if gen_val is not None and gt_val is not None:
+                        pairs.append((gen_val, gt_val))
+        else:
+            # Use standard matching strategies
+            pairs = prepare_comparison_pairs(
+                generated_series,
+                ground_truth_series,
+                match_strategy=self.match_strategy,
+            )
 
         # Calculate metrics for each pair
         all_results = []
@@ -232,3 +292,58 @@ class StructuredDataEvaluator:
             summary_rows.append(row)
 
         return pd.DataFrame(summary_rows)
+    
+    def get_matched_comparisons(self, column_name: str) -> pd.DataFrame:
+        """Get detailed comparisons for matched rows based on key column.
+        
+        Args:
+            column_name: Name of the column to compare
+            
+        Returns:
+            DataFrame with matched rows and their metrics
+        """
+        if self.match_strategy != "key" or self.matched_pairs is None:
+            raise ValueError("Key-based matching not enabled. Set match_strategy='key' and provide key_column.")
+        
+        if column_name not in self.column_names:
+            raise ValueError(
+                f"Column '{column_name}' not found in aligned columns. "
+                f"Available columns: {self.column_names}"
+            )
+        
+        generated_series = self.aligned_generated[column_name]
+        ground_truth_series = self.aligned_ground_truth[column_name]
+        
+        comparison_rows = []
+        for gen_idx, gt_idx, key_value in self.matched_pairs:
+            if gt_idx is not None:
+                gen_val = generated_series.iloc[gen_idx] if gen_idx < len(generated_series) else None
+                gt_val = ground_truth_series.iloc[gt_idx] if gt_idx < len(ground_truth_series) else None
+                
+                if gen_val is not None and gt_val is not None:
+                    # Calculate all metrics
+                    metrics = calculate_all_metrics(gen_val, gt_val)
+                    
+                    row = {
+                        "key": key_value,
+                        "generated_index": gen_idx,
+                        "generated_value": gen_val,
+                        "ground_truth_index": gt_idx,
+                        "ground_truth_value": gt_val,
+                        **metrics
+                    }
+                    comparison_rows.append(row)
+        
+        if not comparison_rows:
+            return pd.DataFrame()
+        
+        # Create dataframe
+        df = pd.DataFrame(comparison_rows)
+        
+        # Reorder columns for better readability
+        metric_cols = [col for col in df.columns if col not in 
+                       ["key", "generated_index", "generated_value", "ground_truth_index", "ground_truth_value"]]
+        column_order = ["key", "generated_index", "generated_value", "ground_truth_index", "ground_truth_value"] + metric_cols
+        df = df[column_order]
+        
+        return df
