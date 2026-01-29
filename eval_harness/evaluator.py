@@ -326,9 +326,7 @@ class StructuredDataEvaluator:
                     
                     row = {
                         "key": key_value,
-                        "generated_index": gen_idx,
                         "generated_value": gen_val,
-                        "ground_truth_index": gt_idx,
                         "ground_truth_value": gt_val,
                         **metrics
                     }
@@ -342,8 +340,8 @@ class StructuredDataEvaluator:
         
         # Reorder columns for better readability
         metric_cols = [col for col in df.columns if col not in 
-                       ["key", "generated_index", "generated_value", "ground_truth_index", "ground_truth_value"]]
-        column_order = ["key", "generated_index", "generated_value", "ground_truth_index", "ground_truth_value"] + metric_cols
+                       ["key", "generated_value", "ground_truth_value"]]
+        column_order = ["key", "generated_value", "ground_truth_value"] + metric_cols
         df = df[column_order]
         
         return df
